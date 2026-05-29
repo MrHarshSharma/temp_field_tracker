@@ -1,6 +1,9 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import styles from './worker.module.css';
+import { haversineDistance } from '@/lib/haversine';
+
+const MIN_DISTANCE_KM = 0.003; // 3 metres — below this is GPS noise, not real movement
 
 export default function WorkerPage() {
   const [name, setName] = useState('');
@@ -10,10 +13,13 @@ export default function WorkerPage() {
   const [lastPing, setLastPing] = useState('');
   const [sessionSummary, setSessionSummary] = useState<{ points: number; duration: string } | null>(null);
 
+  const [isMoving, setIsMoving] = useState<boolean | null>(null);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const sessionIdRef = useRef<string>('');
   const startTimeRef = useRef<Date | null>(null);
+  const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const sendLocation = async (workerName: string, sessionId: string) => {
     if (!navigator.geolocation) {
@@ -22,18 +28,24 @@ export default function WorkerPage() {
     }
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        const last = lastLocationRef.current;
+
+        // Skip if coordinates haven't changed beyond noise threshold
+        if (last && haversineDistance(last.lat, last.lng, lat, lng) < MIN_DISTANCE_KM) {
+          setIsMoving(false);
+          return;
+        }
+
+        setIsMoving(true);
         try {
           const res = await fetch('/api/location', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              worker_name: workerName,
-              session_id: sessionId,
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-            }),
+            body: JSON.stringify({ worker_name: workerName, session_id: sessionId, lat, lng }),
           });
           if (res.ok) {
+            lastLocationRef.current = { lat, lng };
             setPointCount((c) => c + 1);
             setLastPing(new Date().toLocaleTimeString());
             setStatus('');
@@ -51,10 +63,12 @@ export default function WorkerPage() {
     setTracking(true);
     setPointCount(0);
     setLastPing('');
+    setIsMoving(null);
     setSessionSummary(null);
     setStatus('Getting location…');
     startTimeRef.current = new Date();
     sessionIdRef.current = crypto.randomUUID();
+    lastLocationRef.current = null;
 
     if ('wakeLock' in navigator) {
       try { wakeLockRef.current = await navigator.wakeLock.request('screen'); } catch { /* optional */ }
@@ -63,7 +77,7 @@ export default function WorkerPage() {
     await sendLocation(name.trim(), sessionIdRef.current);
     intervalRef.current = setInterval(
       () => sendLocation(name.trim(), sessionIdRef.current),
-      30 * 1000
+      5 * 1000
     );
   };
 
@@ -142,7 +156,9 @@ export default function WorkerPage() {
           <div className={styles.card} style={{ marginTop: '1rem', borderLeft: '4px solid #22c55e' }}>
             <div className={styles.statusRow}>
               <span className={styles.pulsingDot} />
-              <span style={{ fontWeight: 700, color: '#15803d', fontSize: '0.9375rem' }}>Tracking Active</span>
+              <span style={{ fontWeight: 700, color: '#15803d', fontSize: '0.9375rem' }}>
+                {isMoving === false ? 'Stationary' : 'Tracking Active'}
+              </span>
             </div>
             <div className={styles.statRow}>
               <span style={{ color: '#64748b' }}>Worker</span>
@@ -157,7 +173,7 @@ export default function WorkerPage() {
               <span style={{ fontWeight: 600, color: '#0f172a' }}>{lastPing || '—'}</span>
             </div>
             <div style={{ marginTop: '0.875rem', fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center' }}>
-              Pings every 30 seconds · keep this tab open
+              Checks every 5 sec · logs only when you move · keep this tab open
             </div>
           </div>
         )}
