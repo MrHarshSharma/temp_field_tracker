@@ -1,14 +1,19 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import styles from './worker.module.css';
 
 export default function WorkerPage() {
   const [name, setName] = useState('');
   const [tracking, setTracking] = useState(false);
   const [status, setStatus] = useState('');
   const [pointCount, setPointCount] = useState(0);
+  const [lastPing, setLastPing] = useState('');
+  const [sessionSummary, setSessionSummary] = useState<{ points: number; duration: string } | null>(null);
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const sessionIdRef = useRef<string>('');
+  const startTimeRef = useRef<Date | null>(null);
 
   const sendLocation = async (workerName: string, sessionId: string) => {
     if (!navigator.geolocation) {
@@ -30,10 +35,11 @@ export default function WorkerPage() {
           });
           if (res.ok) {
             setPointCount((c) => c + 1);
-            setStatus(`Last ping: ${new Date().toLocaleTimeString()}`);
+            setLastPing(new Date().toLocaleTimeString());
+            setStatus('');
           }
         } catch {
-          setStatus('Failed to send location — will retry next interval');
+          setStatus('Failed to send — will retry');
         }
       },
       (err) => setStatus(`GPS error: ${err.message}`)
@@ -41,24 +47,17 @@ export default function WorkerPage() {
   };
 
   const startTracking = async () => {
-    if (!name.trim()) {
-      setStatus('Please enter your name first');
-      return;
-    }
+    if (!name.trim()) { setStatus('Please enter your name first'); return; }
     setTracking(true);
     setPointCount(0);
-    setStatus('Starting...');
-
-    // New session ID for each Start — keeps trips separate in DB
+    setLastPing('');
+    setSessionSummary(null);
+    setStatus('Getting location…');
+    startTimeRef.current = new Date();
     sessionIdRef.current = crypto.randomUUID();
 
-    // Request wake lock so screen stays on and JS keeps running
     if ('wakeLock' in navigator) {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-      } catch {
-        // Wake lock not critical — continue without it
-      }
+      try { wakeLockRef.current = await navigator.wakeLock.request('screen'); } catch { /* optional */ }
     }
 
     await sendLocation(name.trim(), sessionIdRef.current);
@@ -71,11 +70,17 @@ export default function WorkerPage() {
   const stopTracking = async () => {
     setTracking(false);
     if (intervalRef.current) clearInterval(intervalRef.current);
-    if (wakeLockRef.current) {
-      await wakeLockRef.current.release();
-      wakeLockRef.current = null;
-    }
-    setStatus('Tracking stopped');
+    if (wakeLockRef.current) { await wakeLockRef.current.release(); wakeLockRef.current = null; }
+
+    const elapsed = startTimeRef.current
+      ? Math.round((Date.now() - startTimeRef.current.getTime()) / 60000)
+      : 0;
+    const hrs = Math.floor(elapsed / 60);
+    const mins = elapsed % 60;
+    const duration = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+
+    setSessionSummary({ points: pointCount, duration });
+    setStatus('');
   };
 
   useEffect(() => {
@@ -86,65 +91,95 @@ export default function WorkerPage() {
   }, []);
 
   return (
-    <main style={{ padding: '2rem', maxWidth: '420px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '1.5rem' }}>Field Worker Tracker</h1>
+    <div className={styles.page}>
 
-      <input
-        type="text"
-        placeholder="Enter your name"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        disabled={tracking}
-        style={{
-          width: '100%', padding: '0.75rem', fontSize: '1rem',
-          border: '1px solid #d1d5db', borderRadius: '8px',
-          boxSizing: 'border-box', marginBottom: '1rem',
-        }}
-      />
-
-      {!tracking ? (
-        <button
-          onClick={startTracking}
-          style={{
-            width: '100%', padding: '1rem', fontSize: '1.1rem', fontWeight: 600,
-            background: '#22c55e', color: 'white', border: 'none',
-            borderRadius: '10px', cursor: 'pointer',
-          }}
-        >
-          Start Tracking
-        </button>
-      ) : (
-        <button
-          onClick={stopTracking}
-          style={{
-            width: '100%', padding: '1rem', fontSize: '1.1rem', fontWeight: 600,
-            background: '#ef4444', color: 'white', border: 'none',
-            borderRadius: '10px', cursor: 'pointer',
-          }}
-        >
-          Stop Tracking
-        </button>
-      )}
-
-      {tracking && (
-        <div style={{
-          marginTop: '1.5rem', padding: '1rem',
-          background: '#f0fdf4', borderRadius: '10px',
-          border: '1px solid #bbf7d0',
-        }}>
-          <div style={{ fontWeight: 600, color: '#16a34a', marginBottom: '0.5rem' }}>
-            Tracking active
-          </div>
-          <div>GPS points logged: <strong>{pointCount}</strong></div>
-          <div style={{ fontSize: '0.85rem', color: '#6b7280', marginTop: '0.25rem' }}>
-            Pings every 30 seconds — keep this tab open
-          </div>
+      {/* Header */}
+      <header className={styles.header}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+          <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
+          <span style={{ color: '#f8fafc', fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.01em' }}>FieldTracker</span>
         </div>
-      )}
+        <span style={{ color: '#94a3b8', fontSize: '0.8125rem', fontWeight: 500 }}>Worker</span>
+      </header>
 
-      {status && (
-        <p style={{ marginTop: '1rem', color: '#6b7280', fontSize: '0.9rem' }}>{status}</p>
-      )}
-    </main>
+      <main className={styles.main}>
+
+        {/* Name Card */}
+        <div className={styles.card}>
+          <label style={{ display: 'block', fontSize: '0.6875rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+            Your Name
+          </label>
+          <input
+            type="text"
+            placeholder="e.g. Ravi Kumar"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={tracking}
+            className={styles.nameInput}
+          />
+        </div>
+
+        {/* Start / Stop Button */}
+        {!tracking ? (
+          <button onClick={startTracking} className={styles.btnStart}>
+            Start Tracking
+          </button>
+        ) : (
+          <button onClick={stopTracking} className={styles.btnStop}>
+            Stop Tracking
+          </button>
+        )}
+
+        {/* Error / Info status */}
+        {status && (
+          <p style={{ marginTop: '0.875rem', color: '#64748b', fontSize: '0.875rem', textAlign: 'center' }}>
+            {status}
+          </p>
+        )}
+
+        {/* Active tracking card */}
+        {tracking && (
+          <div className={styles.card} style={{ marginTop: '1rem', borderLeft: '4px solid #22c55e' }}>
+            <div className={styles.statusRow}>
+              <span className={styles.pulsingDot} />
+              <span style={{ fontWeight: 700, color: '#15803d', fontSize: '0.9375rem' }}>Tracking Active</span>
+            </div>
+            <div className={styles.statRow}>
+              <span style={{ color: '#64748b' }}>Worker</span>
+              <span style={{ fontWeight: 600, color: '#0f172a' }}>{name}</span>
+            </div>
+            <div className={styles.statRow}>
+              <span style={{ color: '#64748b' }}>Points logged</span>
+              <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '1rem' }}>{pointCount}</span>
+            </div>
+            <div className={styles.statRow}>
+              <span style={{ color: '#64748b' }}>Last ping</span>
+              <span style={{ fontWeight: 600, color: '#0f172a' }}>{lastPing || '—'}</span>
+            </div>
+            <div style={{ marginTop: '0.875rem', fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center' }}>
+              Pings every 30 seconds · keep this tab open
+            </div>
+          </div>
+        )}
+
+        {/* Session complete card */}
+        {!tracking && sessionSummary && (
+          <div className={styles.card} style={{ marginTop: '1rem', borderLeft: '4px solid #2563eb' }}>
+            <div style={{ fontWeight: 700, color: '#1e40af', marginBottom: '0.875rem', fontSize: '0.9375rem' }}>
+              Session Complete
+            </div>
+            <div className={styles.statRow}>
+              <span style={{ color: '#64748b' }}>Points logged</span>
+              <span style={{ fontWeight: 700, color: '#0f172a' }}>{sessionSummary.points}</span>
+            </div>
+            <div className={styles.statRow}>
+              <span style={{ color: '#64748b' }}>Duration</span>
+              <span style={{ fontWeight: 700, color: '#0f172a' }}>{sessionSummary.duration}</span>
+            </div>
+          </div>
+        )}
+
+      </main>
+    </div>
   );
 }

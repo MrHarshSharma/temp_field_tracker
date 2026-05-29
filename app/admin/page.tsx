@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import styles from './admin.module.css';
 
 declare global {
   interface Window {
@@ -15,7 +16,6 @@ export default function AdminPage() {
   const [selectedWorker, setSelectedWorker] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [distance, setDistance] = useState<number | null>(null);
-  const [pointCount, setPointCount] = useState<number | null>(null);
   const [sessionCount, setSessionCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -36,16 +36,10 @@ export default function AdminPage() {
     });
   }, []);
 
-  // Load Google Maps script
   useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!apiKey) return;
-
-    if (window.google) {
-      initMap();
-      return;
-    }
-
+    if (window.google) { initMap(); return; }
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
     script.async = true;
@@ -62,160 +56,173 @@ export default function AdminPage() {
   useEffect(() => { fetchWorkers(); }, []);
 
   const loadRoute = async () => {
-    if (!selectedWorker || !date) {
-      setError('Select a worker and date');
-      return;
-    }
+    if (!selectedWorker || !date) { setError('Select a worker and date'); return; }
     setError('');
     setLoading(true);
 
-    const res = await fetch(
-      `/api/route?worker=${encodeURIComponent(selectedWorker)}&date=${date}`
-    );
+    const res = await fetch(`/api/route?worker=${encodeURIComponent(selectedWorker)}&date=${date}`, { cache: 'no-store' });
     const data = await res.json();
     setLoading(false);
 
     const sessions: Point[][] = data.sessions ?? [];
-    const totalPoints = sessions.reduce((sum, s) => sum + s.length, 0);
-
     setDistance(data.distance_km);
-    setPointCount(totalPoints);
     setSessionCount(sessions.length);
 
     if (!window.google || !mapInstanceRef.current) return;
 
-    // Clear previous drawings
     polylinesRef.current.forEach((p) => p.setMap(null));
     polylinesRef.current = [];
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
 
-    if (sessions.length === 0) {
-      setError('No data found for this worker on this date');
-      return;
-    }
+    if (sessions.length === 0) { setError('No data found for this worker on this date'); return; }
 
     const bounds = new window.google.maps.LatLngBounds();
 
-    // Draw one polyline per session + start/end markers for each
     sessions.forEach((points, i) => {
       const path = points.map((p) => ({ lat: p.lat, lng: p.lng }));
-
       const polyline = new window.google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeColor: '#2563eb',
-        strokeOpacity: 1,
-        strokeWeight: 4,
+        path, geodesic: true, strokeColor: '#2563eb', strokeOpacity: 1, strokeWeight: 4,
       });
       polyline.setMap(mapInstanceRef.current);
       polylinesRef.current.push(polyline);
-
       path.forEach((p) => bounds.extend(p));
-
-      markersRef.current.push(
-        new window.google.maps.Marker({
-          position: path[0],
-          map: mapInstanceRef.current,
-          label: { text: `S${i + 1}`, color: 'white', fontWeight: 'bold' },
-          title: `Trip ${i + 1} start: ${new Date(points[0].timestamp).toLocaleTimeString()}`,
-        })
-      );
-      markersRef.current.push(
-        new window.google.maps.Marker({
-          position: path[path.length - 1],
-          map: mapInstanceRef.current,
-          label: { text: `E${i + 1}`, color: 'white', fontWeight: 'bold' },
-          title: `Trip ${i + 1} end: ${new Date(points[points.length - 1].timestamp).toLocaleTimeString()}`,
-        })
-      );
+      markersRef.current.push(new window.google.maps.Marker({
+        position: path[0], map: mapInstanceRef.current,
+        label: { text: `S${i + 1}`, color: 'white', fontWeight: 'bold' },
+        title: `Trip ${i + 1} start: ${new Date(points[0].timestamp).toLocaleTimeString()}`,
+      }));
+      markersRef.current.push(new window.google.maps.Marker({
+        position: path[path.length - 1], map: mapInstanceRef.current,
+        label: { text: `E${i + 1}`, color: 'white', fontWeight: 'bold' },
+        title: `Trip ${i + 1} end: ${new Date(points[points.length - 1].timestamp).toLocaleTimeString()}`,
+      }));
     });
 
     mapInstanceRef.current.fitBounds(bounds);
   };
 
   return (
-    <main style={{ padding: '1.5rem' }}>
-      <h1 style={{ marginBottom: '1.5rem' }}>Admin Dashboard</h1>
+    <div className={styles.page}>
 
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem', alignItems: 'center' }}>
-        <select
-          value={selectedWorker}
-          onChange={(e) => setSelectedWorker(e.target.value)}
-          style={{ padding: '0.5rem 0.75rem', fontSize: '1rem', borderRadius: '6px', border: '1px solid #d1d5db' }}
-        >
-          <option value="">Select worker</option>
-          {workers.map((w) => (
-            <option key={w} value={w}>{w}</option>
-          ))}
-        </select>
+      {/* Top Nav */}
+      <header className={styles.header}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+          <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e' }} />
+          <span style={{ color: '#f8fafc', fontWeight: 700, fontSize: '1rem', letterSpacing: '-0.01em' }}>FieldTracker</span>
+        </div>
+        <span style={{ color: '#94a3b8', fontSize: '0.8125rem', fontWeight: 500 }}>Admin Dashboard</span>
+      </header>
 
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          style={{ padding: '0.5rem 0.75rem', fontSize: '1rem', borderRadius: '6px', border: '1px solid #d1d5db' }}
-        />
+      <main className={styles.main}>
 
-        <button
-          onClick={loadRoute}
-          disabled={loading}
-          style={{
-            padding: '0.5rem 1.5rem', fontSize: '1rem', fontWeight: 600,
-            background: loading ? '#93c5fd' : '#2563eb', color: 'white',
-            border: 'none', borderRadius: '6px', cursor: 'pointer',
-          }}
-        >
-          {loading ? 'Loading...' : 'Load Route'}
-        </button>
+        {/* Controls Card */}
+        <div className={styles.controlsCard}>
+          <div className={styles.controlGroup}>
+            <label style={labelStyle}>Worker</label>
+            <select
+              value={selectedWorker}
+              onChange={(e) => setSelectedWorker(e.target.value)}
+              className={styles.input}
+            >
+              <option value="">Select worker</option>
+              {workers.map((w) => <option key={w} value={w}>{w}</option>)}
+            </select>
+          </div>
 
-        <button
-          onClick={fetchWorkers}
-          style={{
-            padding: '0.5rem 1rem', fontSize: '0.95rem',
-            border: '1px solid #d1d5db', borderRadius: '6px',
-            background: 'white', cursor: 'pointer',
-          }}
-        >
-          Refresh Workers
-        </button>
+          <div className={styles.controlGroup}>
+            <label style={labelStyle}>Date</label>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className={styles.input}
+            />
+          </div>
+
+          <button
+            onClick={loadRoute}
+            disabled={loading}
+            className={styles.btnPrimary}
+            style={{ background: loading ? '#93c5fd' : '#2563eb', cursor: loading ? 'not-allowed' : 'pointer' }}
+          >
+            {loading ? 'Loading…' : 'Load Route'}
+          </button>
+
+          <button onClick={fetchWorkers} className={styles.btnSecondary}>
+            ↺ Refresh
+          </button>
+        </div>
+
+        {/* Error Banner */}
+        {error && (
+          <div style={{
+            marginBottom: '1.25rem', padding: '0.875rem 1rem',
+            background: '#fef2f2', border: '1px solid #fecaca',
+            borderRadius: '8px', color: '#dc2626', fontSize: '0.875rem', fontWeight: 500,
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Stat Cards */}
+        {distance !== null && (
+          <div className={styles.statsGrid}>
+            <StatCard label="Total Distance" value={`${distance} km`} accent="#2563eb" />
+            <StatCard label="Trips" value={String(sessionCount)} accent="#7c3aed" />
+            <StatCard label="Worker" value={selectedWorker} accent="#059669" small />
+          </div>
+        )}
+
+        {/* Map Card */}
+        <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.07)', overflow: 'hidden' }}>
+          <div style={{
+            padding: '0.875rem 1.5rem', borderBottom: '1px solid #f1f5f9',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9375rem' }}>Route Map</span>
+              {selectedWorker && distance !== null && (
+                <span style={{
+                  background: '#eff6ff', color: '#2563eb', fontSize: '0.75rem',
+                  fontWeight: 600, padding: '0.2rem 0.6rem', borderRadius: '99px',
+                }}>
+                  {selectedWorker}
+                </span>
+              )}
+            </div>
+            {distance !== null && (
+              <span style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>{date}</span>
+            )}
+          </div>
+          <div ref={mapRef} className={styles.mapDiv} />
+        </div>
+
+      </main>
+    </div>
+  );
+}
+
+const labelStyle: React.CSSProperties = {
+  display: 'block', fontSize: '0.6875rem', fontWeight: 600,
+  color: '#64748b', marginBottom: '0.375rem',
+  textTransform: 'uppercase', letterSpacing: '0.06em',
+};
+
+function StatCard({ label, value, accent, small }: {
+  label: string; value: string | null; accent: string; small?: boolean;
+}) {
+  return (
+    <div style={{
+      background: 'white', borderRadius: '12px', padding: '1.125rem 1.25rem',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.07)', borderLeft: `4px solid ${accent}`,
+    }}>
+      <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.375rem' }}>
+        {label}
       </div>
-
-      {error && (
-        <div style={{ marginBottom: '1rem', padding: '0.75rem', background: '#fef2f2', borderRadius: '6px', color: '#dc2626' }}>
-          {error}
-        </div>
-      )}
-
-      {distance !== null && (
-        <div style={{
-          marginBottom: '1rem', padding: '1rem',
-          background: '#eff6ff', borderRadius: '8px',
-          display: 'flex', gap: '2.5rem', flexWrap: 'wrap',
-          border: '1px solid #bfdbfe',
-        }}>
-          <div><span style={{ color: '#6b7280' }}>Distance</span><br /><strong style={{ fontSize: '1.4rem' }}>{distance} km</strong></div>
-          <div><span style={{ color: '#6b7280' }}>Trips</span><br /><strong style={{ fontSize: '1.4rem' }}>{sessionCount}</strong></div>
-          <div><span style={{ color: '#6b7280' }}>GPS Points</span><br /><strong style={{ fontSize: '1.4rem' }}>{pointCount}</strong></div>
-          <div><span style={{ color: '#6b7280' }}>Worker</span><br /><strong style={{ fontSize: '1.1rem' }}>{selectedWorker}</strong></div>
-          <div><span style={{ color: '#6b7280' }}>Date</span><br /><strong style={{ fontSize: '1.1rem' }}>{date}</strong></div>
-        </div>
-      )}
-
-      <div
-        ref={mapRef}
-        style={{
-          width: '100%', height: '520px',
-          borderRadius: '10px', border: '1px solid #e5e7eb',
-          background: '#f3f4f6',
-        }}
-      />
-
-      {!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY && (
-        <p style={{ marginTop: '0.75rem', color: '#dc2626', fontSize: '0.9rem' }}>
-          NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set — map will not load.
-        </p>
-      )}
-    </main>
+      <div style={{ fontSize: small ? '1.25rem' : '1.625rem', fontWeight: 700, color: '#0f172a', lineHeight: 1.1 }}>
+        {value ?? '—'}
+      </div>
+    </div>
   );
 }
