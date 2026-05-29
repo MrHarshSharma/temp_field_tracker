@@ -16,6 +16,7 @@ export default function AdminPage() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [distance, setDistance] = useState<number | null>(null);
   const [pointCount, setPointCount] = useState<number | null>(null);
+  const [sessionCount, setSessionCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -23,7 +24,7 @@ export default function AdminPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mapInstanceRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const polylineRef = useRef<any>(null);
+  const polylinesRef = useRef<any[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef = useRef<any[]>([]);
 
@@ -53,7 +54,7 @@ export default function AdminPage() {
   }, [initMap]);
 
   const fetchWorkers = async () => {
-    const res = await fetch('/api/workers');
+    const res = await fetch('/api/workers', { cache: 'no-store' });
     const data = await res.json();
     setWorkers(data.workers || []);
   };
@@ -74,55 +75,62 @@ export default function AdminPage() {
     const data = await res.json();
     setLoading(false);
 
+    const sessions: Point[][] = data.sessions ?? [];
+    const totalPoints = sessions.reduce((sum, s) => sum + s.length, 0);
+
     setDistance(data.distance_km);
-    setPointCount(data.points.length);
+    setPointCount(totalPoints);
+    setSessionCount(sessions.length);
 
     if (!window.google || !mapInstanceRef.current) return;
 
     // Clear previous drawings
-    if (polylineRef.current) polylineRef.current.setMap(null);
+    polylinesRef.current.forEach((p) => p.setMap(null));
+    polylinesRef.current = [];
     markersRef.current.forEach((m) => m.setMap(null));
     markersRef.current = [];
 
-    const points: Point[] = data.points;
-    if (points.length === 0) {
+    if (sessions.length === 0) {
       setError('No data found for this worker on this date');
       return;
     }
 
-    const path = points.map((p) => ({ lat: p.lat, lng: p.lng }));
-
-    polylineRef.current = new window.google.maps.Polyline({
-      path,
-      geodesic: true,
-      strokeColor: '#2563eb',
-      strokeOpacity: 1,
-      strokeWeight: 4,
-    });
-    polylineRef.current.setMap(mapInstanceRef.current);
-
-    // Start marker
-    markersRef.current.push(
-      new window.google.maps.Marker({
-        position: path[0],
-        map: mapInstanceRef.current,
-        label: { text: 'S', color: 'white', fontWeight: 'bold' },
-        title: `Start: ${new Date(points[0].timestamp).toLocaleTimeString()}`,
-      })
-    );
-
-    // End marker
-    markersRef.current.push(
-      new window.google.maps.Marker({
-        position: path[path.length - 1],
-        map: mapInstanceRef.current,
-        label: { text: 'E', color: 'white', fontWeight: 'bold' },
-        title: `End: ${new Date(points[points.length - 1].timestamp).toLocaleTimeString()}`,
-      })
-    );
-
     const bounds = new window.google.maps.LatLngBounds();
-    path.forEach((p) => bounds.extend(p));
+
+    // Draw one polyline per session + start/end markers for each
+    sessions.forEach((points, i) => {
+      const path = points.map((p) => ({ lat: p.lat, lng: p.lng }));
+
+      const polyline = new window.google.maps.Polyline({
+        path,
+        geodesic: true,
+        strokeColor: '#2563eb',
+        strokeOpacity: 1,
+        strokeWeight: 4,
+      });
+      polyline.setMap(mapInstanceRef.current);
+      polylinesRef.current.push(polyline);
+
+      path.forEach((p) => bounds.extend(p));
+
+      markersRef.current.push(
+        new window.google.maps.Marker({
+          position: path[0],
+          map: mapInstanceRef.current,
+          label: { text: `S${i + 1}`, color: 'white', fontWeight: 'bold' },
+          title: `Trip ${i + 1} start: ${new Date(points[0].timestamp).toLocaleTimeString()}`,
+        })
+      );
+      markersRef.current.push(
+        new window.google.maps.Marker({
+          position: path[path.length - 1],
+          map: mapInstanceRef.current,
+          label: { text: `E${i + 1}`, color: 'white', fontWeight: 'bold' },
+          title: `Trip ${i + 1} end: ${new Date(points[points.length - 1].timestamp).toLocaleTimeString()}`,
+        })
+      );
+    });
+
     mapInstanceRef.current.fitBounds(bounds);
   };
 
@@ -187,6 +195,7 @@ export default function AdminPage() {
           border: '1px solid #bfdbfe',
         }}>
           <div><span style={{ color: '#6b7280' }}>Distance</span><br /><strong style={{ fontSize: '1.4rem' }}>{distance} km</strong></div>
+          <div><span style={{ color: '#6b7280' }}>Trips</span><br /><strong style={{ fontSize: '1.4rem' }}>{sessionCount}</strong></div>
           <div><span style={{ color: '#6b7280' }}>GPS Points</span><br /><strong style={{ fontSize: '1.4rem' }}>{pointCount}</strong></div>
           <div><span style={{ color: '#6b7280' }}>Worker</span><br /><strong style={{ fontSize: '1.1rem' }}>{selectedWorker}</strong></div>
           <div><span style={{ color: '#6b7280' }}>Date</span><br /><strong style={{ fontSize: '1.1rem' }}>{date}</strong></div>

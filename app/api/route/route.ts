@@ -15,21 +15,35 @@ export async function GET(req: NextRequest) {
 
   const sql = getDb();
   const rows = await sql`
-    SELECT lat, lng, timestamp
+    SELECT lat, lng, timestamp, session_id
     FROM locations
     WHERE worker_name = ${worker}
       AND DATE(timestamp AT TIME ZONE 'Asia/Kolkata') = ${date}
     ORDER BY timestamp ASC
   `;
 
-  const points = rows.map((r) => ({
-    lat: r.lat as number,
-    lng: r.lng as number,
-    timestamp: r.timestamp as string,
-  }));
+  // Group by session_id, preserving chronological session order
+  const sessionMap = new Map<string, { lat: number; lng: number; timestamp: string }[]>();
+  for (const r of rows) {
+    const sid = r.session_id as string;
+    if (!sessionMap.has(sid)) sessionMap.set(sid, []);
+    sessionMap.get(sid)!.push({
+      lat: r.lat as number,
+      lng: r.lng as number,
+      timestamp: r.timestamp as string,
+    });
+  }
+
+  // Sum distance across sessions — never connects points between sessions
+  let totalDist = 0;
+  const sessions: { lat: number; lng: number; timestamp: string }[][] = [];
+  for (const sessionPoints of Array.from(sessionMap.values())) {
+    totalDist += totalDistance(sessionPoints);
+    sessions.push(sessionPoints);
+  }
 
   return NextResponse.json({
-    points,
-    distance_km: totalDistance(points),
+    sessions,
+    distance_km: Math.round(totalDist * 100) / 100,
   });
 }

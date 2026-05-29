@@ -8,8 +8,9 @@ export default function WorkerPage() {
   const [pointCount, setPointCount] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const sessionIdRef = useRef<string>('');
 
-  const sendLocation = async (workerName: string) => {
+  const sendLocation = async (workerName: string, sessionId: string) => {
     if (!navigator.geolocation) {
       setStatus('Geolocation not supported on this device');
       return;
@@ -22,6 +23,7 @@ export default function WorkerPage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               worker_name: workerName,
+              session_id: sessionId,
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
             }),
@@ -47,6 +49,9 @@ export default function WorkerPage() {
     setPointCount(0);
     setStatus('Starting...');
 
+    // New session ID for each Start — keeps trips separate in DB
+    sessionIdRef.current = crypto.randomUUID();
+
     // Request wake lock so screen stays on and JS keeps running
     if ('wakeLock' in navigator) {
       try {
@@ -56,8 +61,11 @@ export default function WorkerPage() {
       }
     }
 
-    await sendLocation(name.trim());
-    intervalRef.current = setInterval(() => sendLocation(name.trim()), 30 * 1000);
+    await sendLocation(name.trim(), sessionIdRef.current);
+    intervalRef.current = setInterval(
+      () => sendLocation(name.trim(), sessionIdRef.current),
+      30 * 1000
+    );
   };
 
   const stopTracking = async () => {
